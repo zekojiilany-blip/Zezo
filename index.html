@@ -1,0 +1,296 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>محادثة صوتية ذكية</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: 'Segoe UI', 'Cairo', sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            padding: 20px;
+        }
+        .container {
+            background: white;
+            border-radius: 20px;
+            box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+            width: 100%;
+            max-width: 600px;
+            overflow: hidden;
+        }
+        .header {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 25px;
+            text-align: center;
+        }
+        .api-section {
+            background: #fef3c7;
+            padding: 15px;
+            border-bottom: 2px solid #f59e0b;
+        }
+        .api-section input {
+            width: 100%;
+            padding: 10px;
+            border: 2px solid #f59e0b;
+            border-radius: 10px;
+            font-size: 14px;
+            direction: ltr;
+            text-align: left;
+            font-family: monospace;
+        }
+        .chat-area {
+            height: 350px;
+            overflow-y: auto;
+            padding: 20px;
+            background: #f8f9fa;
+        }
+        .message { margin-bottom: 15px; animation: fadeIn 0.3s; }
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(10px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+        .user-message {
+            background: #667eea;
+            color: white;
+            padding: 12px 18px;
+            border-radius: 20px 20px 5px 20px;
+            float: right;
+            clear: both;
+            max-width: 80%;
+        }
+        .ai-message {
+            background: white;
+            color: #333;
+            padding: 12px 18px;
+            border-radius: 20px 20px 20px 5px;
+            float: left;
+            clear: both;
+            max-width: 80%;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+        }
+        .status {
+            text-align: center;
+            padding: 10px;
+            background: white;
+            border-top: 1px solid #eee;
+        }
+        .controls {
+            padding: 20px;
+            background: white;
+            border-top: 1px solid #eee;
+            display: flex;
+            gap: 10px;
+            justify-content: center;
+        }
+        .btn {
+            padding: 15px 30px;
+            border: none;
+            border-radius: 30px;
+            font-size: 16px;
+            cursor: pointer;
+            font-weight: bold;
+        }
+        .btn-start { background: #4CAF50; color: white; }
+        .btn-stop { background: #f44336; color: white; }
+        .btn:disabled { opacity: 0.5; cursor: not-allowed; }
+        .error-message {
+            background: #ffe6e6;
+            color: #cc0000;
+            padding: 10px;
+            margin: 10px;
+            border-radius: 10px;
+            display: none;
+            text-align: center;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>🤖 المساعد الصوتي الذكي</h1>
+            <p>اضغط على الميكروفون وتحدث</p>
+        </div>
+        <div class="api-section">
+            <label>🔑 Hugging Face Token (اختياري):</label>
+            <input type="text" id="apiToken" placeholder="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">
+        </div>
+        <div class="error-message" id="errorMessage"></div>
+        <div class="chat-area" id="chatArea">
+            <div class="message">
+                <div class="ai-message">👋 مرحباً! أنا مساعدك الذكي. اضغط على زر الميكروفون الأخضر وابدأ التحدث.</div>
+            </div>
+        </div>
+        <div class="status">
+            <span id="statusText">🟢 جاهز للاستماع</span>
+        </div>
+        <div class="controls">
+            <button class="btn btn-start" id="startBtn" onclick="startListening()">🎤 ابدأ التحدث</button>
+            <button class="btn btn-stop" id="stopBtn" onclick="stopListening()" disabled>⏹️ إيقاف</button>
+        </div>
+    </div>
+    <script>
+        let recognition = null;
+        let isListening = false;
+
+        const knowledgeBase = {
+            'مرحبا': 'أهلاً بك! كيف يمكنني مساعدتك؟',
+            'السلام عليكم': 'وعليكم السلام ورحمة الله وبركاته',
+            'كيف حالك': 'الحمد لله بخير، شكراً لسؤالك!',
+            'ما اسمك': 'اسمي المساعد الذكي، موجود لخدمتك!',
+            'شكرا': 'العفو! سعيد بمساعدتك.',
+            'وداعا': 'مع السلامة! تشرفت بمحادثتك.',
+            'نكتة': 'لماذا لا يثق المبرمج بالسلالم؟ لأنها دائماً تصعد وتنزل! 😄',
+            'الصلاة': 'الصلاة عماد الدين، حافظ عليها فهي نور لك في الدنيا والآخرة.',
+            'القرآن': 'القرآن الكريم هو كلام الله المنزل على سيدنا محمد ﷺ، فيه هدى ونور للناس.',
+            'العلم': 'العلم نور، طلب العلم فريضة على كل مسلم ومسلمة.',
+            'الأخلاق': 'حسن الخلق من أفضل ما يتحلى به الإنسان.',
+            'الرياضة': 'الرياضة مهمة لصحة الجسم والعقل، المؤمن القوي خير وأحب إلى الله.'
+        };
+
+        function getAIResponse(text) {
+            const input = text.trim().toLowerCase();
+            for (let key in knowledgeBase) {
+                if (input.includes(key)) return knowledgeBase[key];
+            }
+            const general = ['سؤال مثير! حدثني أكثر.', 'فهمت. هل لديك سؤال آخر؟', 'جميل! أنا هنا للمساعدة.'];
+            return general[Math.floor(Math.random() * general.length)];
+        }
+
+        function addMessage(text, isUser) {
+            const chatArea = document.getElementById('chatArea');
+            const msgDiv = document.createElement('div');
+            msgDiv.className = 'message';
+            const content = document.createElement('div');
+            content.className = isUser ? 'user-message' : 'ai-message';
+            content.textContent = text;
+            msgDiv.appendChild(content);
+            chatArea.appendChild(msgDiv);
+            chatArea.scrollTop = chatArea.scrollHeight;
+        }
+
+        function speak(text) {
+            return new Promise(resolve => {
+                window.speechSynthesis.cancel();
+                const u = new SpeechSynthesisUtterance(text);
+                u.lang = 'ar-SA';
+                u.rate = 0.9;
+                const voices = window.speechSynthesis.getVoices();
+                const arVoice = voices.find(v => v.lang.startsWith('ar'));
+                if (arVoice) u.voice = arVoice;
+                document.getElementById('statusText').textContent = '🔊 جاري التحدث...';
+                u.onend = () => {
+                    document.getElementById('statusText').textContent = '🟢 جاهز للاستماع';
+                    resolve();
+                };
+                u.onerror = () => {
+                    document.getElementById('statusText').textContent = '🟢 جاهز للاستماع';
+                    resolve();
+                };
+                window.speechSynthesis.speak(u);
+            });
+        }
+
+        async function startListening() {
+            // تنبيه إذا كان البروتوكول file://
+            if (window.location.protocol === 'file:') {
+                showError('⚠️ افتح الصفحة عبر http://localhost. استخدم Live Server في VS Code أو جرب متصفح Firefox.');
+                return;
+            }
+
+            if (!('webkitSpeechRecognition' in window) && !('SpeechRecognition' in window)) {
+                showError('متصفحك لا يدعم التعرف الصوتي. استخدم Chrome أو Edge.');
+                return;
+            }
+
+            // طلب إذن الميكروفون
+            try {
+                const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+                stream.getTracks().forEach(track => track.stop());
+            } catch (err) {
+                if (err.name === 'NotAllowedError') {
+                    showError('تم رفض الميكروفون. في Chrome: اضغط على أيقونة القفل بجوار العنوان > سماح للميكروفون. ثم أعد تحميل الصفحة.');
+                } else {
+                    showError('لا يمكن الوصول للميكروفون. تأكد من توصيله وتجربة متصفح آخر.');
+                }
+                return;
+            }
+
+            const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+            recognition = new SpeechRecognition();
+            recognition.lang = 'ar-SA';
+            recognition.continuous = false;
+            recognition.interimResults = false;
+
+            recognition.onstart = () => {
+                isListening = true;
+                document.getElementById('statusText').textContent = '🎤 استمع إليك... تكلم الآن';
+                document.getElementById('startBtn').disabled = true;
+                document.getElementById('stopBtn').disabled = false;
+                document.getElementById('errorMessage').style.display = 'none';
+            };
+
+            recognition.onresult = async (event) => {
+                const userText = event.results[0][0].transcript;
+                addMessage(userText, true);
+                const aiResponse = getAIResponse(userText);
+                await new Promise(r => setTimeout(r, 500));
+                addMessage(aiResponse, false);
+                await speak(aiResponse);
+                if (isListening) {
+                    setTimeout(() => { try { recognition.start(); } catch(e){} }, 300);
+                }
+            };
+
+            recognition.onerror = (event) => {
+                if (event.error === 'not-allowed') {
+                    showError('تم رفض الميكروفون. اضغط أيقونة القفل في شريط العنوان واسمح بالوصول.');
+                } else if (event.error === 'no-speech') {
+                    document.getElementById('statusText').textContent = '🟡 لم أسمع شيئاً... حاول مجدداً';
+                } else {
+                    document.getElementById('statusText').textContent = '🔴 خطأ: ' + event.error;
+                }
+                if (isListening) {
+                    setTimeout(() => { try { recognition.start(); } catch(e) { stopListening(); } }, 1000);
+                }
+            };
+
+            recognition.onend = () => {
+                if (isListening) {
+                    try { recognition.start(); } catch(e) { stopListening(); }
+                }
+            };
+
+            try {
+                recognition.start();
+            } catch(e) {
+                showError('فشل تشغيل التعرف الصوتي. أعد تحميل الصفحة.');
+                stopListening();
+            }
+        }
+
+        function stopListening() {
+            isListening = false;
+            if (recognition) try { recognition.stop(); } catch(e) {}
+            window.speechSynthesis.cancel();
+            document.getElementById('statusText').textContent = '🟢 تم الإيقاف';
+            document.getElementById('startBtn').disabled = false;
+            document.getElementById('stopBtn').disabled = true;
+        }
+
+        function showError(msg) {
+            const el = document.getElementById('errorMessage');
+            el.textContent = '❌ ' + msg;
+            el.style.display = 'block';
+            setTimeout(() => el.style.display = 'none', 6000);
+        }
+
+        window.addEventListener('beforeunload', stopListening);
+    </script>
+</body>
+</html>
